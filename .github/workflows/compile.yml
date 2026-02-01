@@ -5,39 +5,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Arduino CLI
-        uses: arduino/setup-arduino-cli@v1
+        uses: arduino/setup-arduino-cli@v2
 
       - name: Install ESP8266 SDK 2.0.0
         run: |
           arduino-cli core update-index --additional-urls http://arduino.esp8266.com/stable/package_esp8266com_index.json
-          # MENGUNCI VERSI KE 2.0.0 AGAR DEAUTH JALAN
           arduino-cli core install esp8266:esp8266@2.0.0 --additional-urls http://arduino.esp8266.com/stable/package_esp8266com_index.json
 
       - name: Install Library OLED
         run: |
           arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
 
-      - name: Masak Firmware & Filesystem
+      - name: Build Firmware and FS
         run: |
-          # 1. Compile file .ino ke .bin
+          mkdir -p build
+          # Compile INO ke BIN
           arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 --output-dir ./build GM-PRO_V3.9.ino
           
-          # 2. Siapkan tool pembuat filesystem
+          # Buat FS Image (LittleFS)
           wget https://github.com/earlephilhower/mklittlefs/releases/download/3.2.0/mklittlefs-3.2.0-linux4.amd64.tar.gz
           tar -xf mklittlefs-3.2.0-linux4.amd64.tar.gz
-          
-          # 3. Ubah folder data jadi biner (SPIFFS 2MB)
           ./mklittlefs -c data/ -p 256 -b 8192 -s 2072576 ./build/spiffs.bin
           
-          # 4. GABUNGKAN (Merge) Firmware + Data jadi Satu File
+          # Gabungkan Jadi Satu File (All-in-One)
           pip install esptool
           python -m esptool --chip esp8266 merge_bin -o ./build/FULL_FIRMWARE_SDK200.bin 0x0 ./build/GM-PRO_V3.9.ino.bin 0x200000 ./build/spiffs.bin
 
-      - name: Simpan Hasil Jadi
-        uses: actions/upload-artifact@v3
+      - name: Upload Result
+        uses: actions/upload-artifact@v4
         with:
-          name: GM-PRO-V3.9-SDK200
+          name: Firmware_Satu_File
           path: ./build/FULL_FIRMWARE_SDK200.bin
