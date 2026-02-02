@@ -1,43 +1,45 @@
-name: Build-GM-PRO-SDK200
+name: Build-GM-PRO-ULTIMATE
+
 on: [push]
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
-      - name: Install ESP8266 SDK 2.0.0
+      - name: Install ESP8266 Core SDK 2.0.0
         run: |
           arduino-cli core update-index --additional-urls http://arduino.esp8266.com/stable/package_esp8266com_index.json
           arduino-cli core install esp8266:esp8266@2.0.0 --additional-urls http://arduino.esp8266.com/stable/package_esp8266com_index.json
 
-      - name: Install Library OLED
+      - name: Install Libraries
         run: |
           arduino-cli lib install "ESP8266 and ESP32 OLED driver for SSD1306 displays"
 
-      - name: Build Firmware and FS
+      - name: Compile and Merge
         run: |
           mkdir -p build
-          # Pastikan nama file di bawah ini SAMA dengan file .ino kamu di repo
+          # Compile file INO utama
           arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 --output-dir ./build GM-PRO-ULTIMATE.ino
           
-          # Alat pembuat sistem file
+          # Download mklittlefs untuk memproses folder data
           wget https://github.com/earlephilhower/mklittlefs/releases/download/3.2.0/mklittlefs-3.2.0-linux4.amd64.tar.gz
           tar -xf mklittlefs-3.2.0-linux4.amd64.tar.gz
           
-          # Bungkus folder data
+          # Membuat file binary dari folder data (index.html)
           ./mklittlefs -c data/ -p 256 -b 8192 -s 2072576 ./build/spiffs.bin
           
-          # Gabungkan (Merge) jadi satu file .bin
+          # Menggabungkan semua partisi menjadi satu file .bin utuh
           pip install esptool
-          python -m esptool --chip esp8266 merge_bin -o ./build/FULL_FIRMWARE_SDK200.bin 0x0 ./build/GM-PRO-ULTIMATE.ino.bin 0x200000 ./build/spiffs.bin
+          python -m esptool --chip esp8266 merge_bin -o ./build/FULL_FIRMWARE.bin 0x0 ./build/GM-PRO-ULTIMATE.ino.bin 0x200000 ./build/spiffs.bin
 
-      - name: Upload Result
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Firmware_Jadi
-          path: ./build/FULL_FIRMWARE_SDK200.bin
+          name: Firmware_Selesai
+          path: ./build/FULL_FIRMWARE.bin
